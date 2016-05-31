@@ -24,9 +24,6 @@
 #include <sys/prctl.h>
 #endif
 #include <fcntl.h>
-#include <poll.h>
-
-#include <unistd.h>
 
 #include <array>
 #include <algorithm>
@@ -43,6 +40,8 @@
 #include <folly/String.h>
 #include <folly/io/Cursor.h>
 #include <folly/portability/Environment.h>
+#include <folly/portability/Sockets.h>
+#include <folly/portability/Unistd.h>
 
 constexpr int kExecFailure = 127;
 constexpr int kChildFailure = 126;
@@ -162,13 +161,13 @@ Subprocess::Options& Subprocess::Options::fd(int fd, int action) {
   return *this;
 }
 
+Subprocess::Subprocess() {}
+
 Subprocess::Subprocess(
     const std::vector<std::string>& argv,
     const Options& options,
     const char* executable,
-    const std::vector<std::string>* env)
-  : pid_(-1),
-    returnCode_(RV_NOT_STARTED) {
+    const std::vector<std::string>* env) {
   if (argv.empty()) {
     throw std::invalid_argument("argv must not be empty");
   }
@@ -179,9 +178,7 @@ Subprocess::Subprocess(
 Subprocess::Subprocess(
     const std::string& cmd,
     const Options& options,
-    const std::vector<std::string>* env)
-  : pid_(-1),
-    returnCode_(RV_NOT_STARTED) {
+    const std::vector<std::string>* env) {
   if (options.usePath_) {
     throw std::invalid_argument("usePath() not allowed when running in shell");
   }
@@ -606,21 +603,23 @@ pid_t Subprocess::pid() const {
 
 namespace {
 
-std::pair<const uint8_t*, size_t> queueFront(const IOBufQueue& queue) {
+ByteRange queueFront(const IOBufQueue& queue) {
   auto* p = queue.front();
-  if (!p) return std::make_pair(nullptr, 0);
-  return io::Cursor(p).peek();
+  if (!p) {
+    return ByteRange{};
+  }
+  return io::Cursor(p).peekBytes();
 }
 
 // fd write
 bool handleWrite(int fd, IOBufQueue& queue) {
   for (;;) {
-    auto p = queueFront(queue);
-    if (p.second == 0) {
+    auto b = queueFront(queue);
+    if (b.empty()) {
       return true;  // EOF
     }
 
-    ssize_t n = writeNoInt(fd, p.first, p.second);
+    ssize_t n = writeNoInt(fd, b.data(), b.size());
     if (n == -1 && errno == EAGAIN) {
       return false;
     }

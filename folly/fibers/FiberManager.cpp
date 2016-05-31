@@ -16,8 +16,6 @@
 #include "FiberManager.h"
 
 #include <signal.h>
-#include <sys/syscall.h>
-#include <unistd.h>
 
 #include <cassert>
 #include <stdexcept>
@@ -28,6 +26,8 @@
 #include <folly/fibers/LoopController.h>
 
 #include <folly/SingletonThreadLocal.h>
+#include <folly/portability/SysSyscall.h>
+#include <folly/portability/Unistd.h>
 
 #ifdef FOLLY_SANITIZE_ADDRESS
 
@@ -277,6 +277,7 @@ static AsanUnpoisonMemoryRegionFuncPtr getUnpoisonMemoryRegionFunc() {
 
 #endif // FOLLY_SANITIZE_ADDRESS
 
+#ifndef _WIN32
 namespace {
 
 // SIGSTKSZ (8 kB on our architectures) isn't always enough for
@@ -333,5 +334,6 @@ void FiberManager::registerAlternateSignalStack() {
 
   alternateSignalStackRegistered_ = true;
 }
+#endif
 }
 }

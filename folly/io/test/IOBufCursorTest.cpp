@@ -19,7 +19,6 @@
 #include <folly/Format.h>
 #include <folly/Range.h>
 #include <folly/io/Cursor.h>
-#include <folly/io/Cursor-defs.h>
 
 #include <gtest/gtest.h>
 
@@ -182,10 +181,10 @@ void append(Appender& appender, StringPiece data) {
 std::string toString(const IOBuf& buf) {
   std::string str;
   Cursor cursor(&buf);
-  std::pair<const uint8_t*, size_t> p;
-  while ((p = cursor.peek()).second) {
-    str.append(reinterpret_cast<const char*>(p.first), p.second);
-    cursor.skip(p.second);
+  ByteRange b;
+  while (!(b = cursor.peekBytes()).empty()) {
+    str.append(reinterpret_cast<const char*>(b.data()), b.size());
+    cursor.skip(b.size());
   }
   return str;
 }
@@ -218,18 +217,15 @@ TEST(IOBuf, PullAndPeek) {
 
   {
     RWPrivateCursor cursor(iobuf1.get());
-    auto p = cursor.peek();
-    EXPECT_EQ("he", std::string(reinterpret_cast<const char*>(p.first),
-                                p.second));
-    cursor.skip(p.second);
-    p = cursor.peek();
-    EXPECT_EQ("llo ", std::string(reinterpret_cast<const char*>(p.first),
-                                  p.second));
-    cursor.skip(p.second);
-    p = cursor.peek();
-    EXPECT_EQ("world", std::string(reinterpret_cast<const char*>(p.first),
-                                   p.second));
-    cursor.skip(p.second);
+    auto b = cursor.peekBytes();
+    EXPECT_EQ("he", StringPiece(b));
+    cursor.skip(b.size());
+    b = cursor.peekBytes();
+    EXPECT_EQ("llo ", StringPiece(b));
+    cursor.skip(b.size());
+    b = cursor.peekBytes();
+    EXPECT_EQ("world", StringPiece(b));
+    cursor.skip(b.size());
     EXPECT_EQ(3, iobuf1->countChainElements());
     EXPECT_EQ(11, iobuf1->computeChainDataLength());
   }
@@ -237,9 +233,8 @@ TEST(IOBuf, PullAndPeek) {
   {
     RWPrivateCursor cursor(iobuf1.get());
     cursor.gather(11);
-    auto p = cursor.peek();
-    EXPECT_EQ("hello world", std::string(reinterpret_cast<const
-                                         char*>(p.first), p.second));
+    auto b = cursor.peekBytes();
+    EXPECT_EQ("hello world", StringPiece(b));
     EXPECT_EQ(1, iobuf1->countChainElements());
     EXPECT_EQ(11, iobuf1->computeChainDataLength());
   }
@@ -377,7 +372,7 @@ TEST(IOBuf, cloneAndInsert) {
     EXPECT_EQ(7, iobuf1->countChainElements());
     EXPECT_EQ(14, iobuf1->computeChainDataLength());
     // Check that nextBuf got set correctly to the buffer with 1 byte left
-    EXPECT_EQ(1, cursor.peek().second);
+    EXPECT_EQ(1, cursor.peekBytes().size());
     cursor.read<uint8_t>();
   }
 
@@ -773,5 +768,98 @@ TEST(IOBuf, StringOperations) {
 
     Cursor curs(chain.get());
     EXPECT_STREQ("hello", curs.readFixedString(5).c_str());
+  }
+}
+
+TEST(IOBuf, ReadWhileTrue) {
+  auto isAlpha = [](uint8_t ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+  };
+  auto isDigit = [](uint8_t ch) { return (ch >= '0' && ch <= '9'); };
+
+  // Test reading alternating alphabetic and numeric strings
+  {
+    std::unique_ptr<IOBuf> chain(IOBuf::create(32));
+    Appender app(chain.get(), 0);
+    app.push(StringPiece("hello123world456"));
+
+    Cursor curs(chain.get());
+    EXPECT_STREQ("hello", curs.readWhile(isAlpha).c_str());
+    EXPECT_STREQ("123", curs.readWhile(isDigit).c_str());
+    EXPECT_STREQ("world", curs.readWhile(isAlpha).c_str());
+    EXPECT_STREQ("456", curs.readWhile(isDigit).c_str());
+    EXPECT_TRUE(curs.isAtEnd());
+  }
+
+  // The same, but also use skipWhile()
+  {
+    std::unique_ptr<IOBuf> chain(IOBuf::create(16));
+    Appender app(chain.get(), 0);
+    app.push(StringPiece("hello123world456"));
+
+    Cursor curs(chain.get());
+    EXPECT_STREQ("hello", curs.readWhile(isAlpha).c_str());
+    curs.skipWhile(isDigit);
+    curs.skipWhile(isAlpha);
+    EXPECT_STREQ("456", curs.readWhile(isDigit).c_str());
+    EXPECT_TRUE(curs.isAtEnd());
+  }
+
+  // Test readWhile() using data split across multiple buffers,
+  // including some empty buffers in the middle of the chain.
+  {
+    std::unique_ptr<IOBuf> chain;
+
+    // First element in the chain has "he"
+    auto buf = IOBuf::create(40);
+    Appender app(buf.get(), 0);
+    app.push(StringPiece("he"));
+    chain = std::move(buf);
+
+    // The second element has "ll", after 10 bytes of headroom
+    buf = IOBuf::create(40);
+    buf->advance(10);
+    app = Appender{buf.get(), 0};
+    app.push(StringPiece("ll"));
+    chain->prependChain(std::move(buf));
+
+    // The third element is empty
+    buf = IOBuf::create(40);
+    buf->advance(15);
+    chain->prependChain(std::move(buf));
+
+    // The fourth element has "o12"
+    buf = IOBuf::create(40);
+    buf->advance(37);
+    app = Appender{buf.get(), 0};
+    app.push(StringPiece("o12"));
+    chain->prependChain(std::move(buf));
+
+    // The fifth element has "3"
+    buf = IOBuf::create(40);
+    app = Appender{buf.get(), 0};
+    app.push(StringPiece("3"));
+    chain->prependChain(std::move(buf));
+
+    // The sixth element is empty
+    buf = IOBuf::create(40);
+    chain->prependChain(std::move(buf));
+
+    // The seventh element has "world456"
+    buf = IOBuf::create(40);
+    app = Appender{buf.get(), 0};
+    app.push(StringPiece("world456"));
+    chain->prependChain(std::move(buf));
+
+    // The eighth element is empty
+    buf = IOBuf::create(40);
+    chain->prependChain(std::move(buf));
+
+    Cursor curs(chain.get());
+    EXPECT_STREQ("hello", curs.readWhile(isAlpha).c_str());
+    EXPECT_STREQ("123", curs.readWhile(isDigit).c_str());
+    EXPECT_STREQ("world", curs.readWhile(isAlpha).c_str());
+    EXPECT_STREQ("456", curs.readWhile(isDigit).c_str());
+    EXPECT_TRUE(curs.isAtEnd());
   }
 }

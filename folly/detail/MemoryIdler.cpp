@@ -21,12 +21,13 @@
 #include <folly/Portability.h>
 #include <folly/ScopeGuard.h>
 #include <folly/detail/CacheLocality.h>
+#include <folly/portability/SysMman.h>
+#include <folly/portability/Unistd.h>
+
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <unistd.h>
 #include <utility>
 
 namespace folly { namespace detail {

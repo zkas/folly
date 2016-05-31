@@ -21,16 +21,15 @@
 
 #include <folly/Conv.h>
 #include <folly/portability/SysSyscall.h>
+#include <folly/portability/Unistd.h>
 
 #include <chrono>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <errno.h>
 #include <glog/logging.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <stdexcept>
 

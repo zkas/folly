@@ -16,9 +16,7 @@
 
 #include <folly/Subprocess.h>
 
-#include <unistd.h>
 #include <sys/types.h>
-#include <dirent.h>
 
 #include <boost/container/flat_set.hpp>
 #include <glog/logging.h>
@@ -33,6 +31,8 @@
 #include <folly/gen/String.h>
 #include <folly/experimental/TestUtil.h>
 #include <folly/experimental/io/FsUtil.h>
+#include <folly/portability/Dirent.h>
+#include <folly/portability/Unistd.h>
 
 using namespace folly;
 
@@ -69,6 +69,19 @@ TEST(SimpleSubprocessTest, MoveSubprocess) {
   EXPECT_TRUE(new_proc.returnCode().running());
   EXPECT_EQ(0, new_proc.wait().exitStatus());
   // Now old_proc is destroyed, but we don't crash.
+}
+
+TEST(SimpleSubprocessTest, DefaultConstructor) {
+  Subprocess proc;
+  EXPECT_TRUE(proc.returnCode().notStarted());
+
+  {
+    auto p1 = Subprocess(std::vector<std::string>{"/bin/true"});
+    proc = std::move(p1);
+  }
+
+  EXPECT_TRUE(proc.returnCode().running());
+  EXPECT_EQ(0, proc.wait().exitStatus());
 }
 
 #define EXPECT_SPAWN_ERROR(err, errMsg, cmd, ...) \

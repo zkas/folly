@@ -17,6 +17,9 @@
 #include <folly/MPMCQueue.h>
 #include <folly/Format.h>
 #include <folly/Memory.h>
+#include <folly/portability/SysResource.h>
+#include <folly/portability/SysTime.h>
+#include <folly/portability/Unistd.h>
 #include <folly/test/DeterministicSchedule.h>
 
 #include <boost/intrusive_ptr.hpp>
@@ -24,9 +27,6 @@
 #include <functional>
 #include <thread>
 #include <utility>
-#include <unistd.h>
-#include <sys/time.h>
-#include <sys/resource.h>
 
 #include <gtest/gtest.h>
 
